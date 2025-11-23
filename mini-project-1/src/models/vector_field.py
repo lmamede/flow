@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import math
+
 
 class VectorField(nn.Module):
     """
@@ -13,24 +15,49 @@ class VectorField(nn.Module):
         super().__init__()
         self.features = features
         self.time_embed_dim = time_embed_dim
-        # TODO: Implementar
-        # Dicas:
-        # 1. Time embedding: usar sinusoidal encoding
-        # 2. Network: MLP simples ou com skip connections
-        # 3. Inicialização: última camada com pesos pequenos (σ=0.01)
-        
+
+        layers = []
+        input_dim = features + time_embed_dim
+
+        for h in hidden_dims:
+            layers.append(nn.Linear(input_dim, h))
+            layers.append(nn.ReLU())
+            input_dim = h
+
+        final = nn.Linear(input_dim, features)
+        nn.init.normal_(final.weight, mean=0.0, std=0.01)
+        nn.init.zeros_(final.bias)
+
+        layers.append(final)
+        self.net = nn.Sequential(*layers)
+
     def time_embedding(self, t):
         """
         Sinusoidal time embedding.
         Args:
             t: (batch,) ou escalar
         Returns:
-            embedded: (batch, time_embed_dim)
+            (batch, time_embed_dim)
         """
-        # TODO: implementar
-        # t_emb[2i] = sin(t / 10000^(2i/d))
-        # t_emb[2i+1] = cos(t / 10000^(2i/d))
-        pass
+        if not torch.is_tensor(t):
+            t = torch.tensor(t)
+
+        t = t.float().unsqueeze(-1)
+
+        half_dim = self.time_embed_dim // 2
+
+        frequencies = torch.exp(
+            -math.log(10000) * torch.arange(half_dim, dtype=torch.float32) / half_dim
+        ).to(t.device)
+
+        args = t * frequencies
+
+        emb = torch.cat([torch.sin(args), torch.cos(args)], dim=-1)
+
+        if self.time_embed_dim % 2 == 1:
+            emb = nn.functional.pad(emb, (0, 1))
+
+        return emb
 
     def forward(self, t, x):
         """
@@ -41,9 +68,14 @@ class VectorField(nn.Module):
         Returns:
             dx_dt: (batch, features)
         """
-        # TODO: implementar
-        # 1. Expandir t para batch se necessário
-        # 2. Time embedding
-        # 3. Concatenar [x, t_emb]
-        # 4. Passar pela rede
-        pass
+        if not torch.is_tensor(t):
+            t = torch.tensor(t, dtype=x.dtype, device=x.device)
+
+        if t.ndim == 0:
+            t = t.repeat(x.shape[0])
+
+        t_emb = self.time_embedding(t)  
+
+        h = torch.cat([x, t_emb], dim=-1)
+
+        return self.net(h)
