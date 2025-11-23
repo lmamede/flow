@@ -24,7 +24,7 @@ class VectorField(nn.Module):
         Sinusoidal time embedding.
         Args:
             t: (batch,) ou escalar
-            Returns:
+        Returns:
             embedded: (batch, time_embed_dim)
         """
         # TODO: implementar
@@ -38,7 +38,7 @@ class VectorField(nn.Module):
         Args:
             t: tempo (escalar ou (batch,))
             x: estado (batch, features)
-            Returns:
+        Returns:
             dx_dt: (batch, features)
         """
         # TODO: implementar
