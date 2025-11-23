@@ -1,4 +1,5 @@
 from torchdiffeq import odeint_adjoint
+from torchdiffeq import odeint
 import torch
 import torch.nn as nn
 
@@ -19,6 +20,33 @@ class CNF(nn.Module):
         else:
             self.base_dist = base_dist
 
+    
+    def divergence_exact(f, x):
+        """
+        Calcula trace(∂f/∂x) exatamente usando autograd.
+        ATENÇÃO: Custo O(d2) - só viável para dimensão baixa!
+        Args:
+            f: função R^d -> R^d
+            x: input (batch, d)
+            Returns:
+            trace: (batch,)
+        """
+        batch_size, dim = x.shape
+
+        # TODO: Implementar
+        # Estratégia:
+        # 1. Para cada dimensão i:
+        # - Compute ∂f_i/∂x_i usando torch.autograd.grad
+        # 2. Somar todas as derivadas diagonais
+
+        # Pseudo-código:
+        # trace = 0
+        # for i in range(dim):
+        # # Compute ∂f[i]/∂x[i]
+        # df_i = autograd.grad(f[:, i].sum(), x, create_graph=True)[0]
+        # trace += df_i[:, i]
+        # return trace
+        pass
 
     def _augmented_dynamics(self, t, state):
         """
@@ -41,7 +69,7 @@ class CNF(nn.Module):
         dx_dt = self.vf(t, x) # (batch, features)
         
         # Compute trace do Jacobiano
-        trace = divergence_exact(lambda x: self.vf(t, x), x) # (batch,)
+        trace = self.divergence_exact(lambda x: self.vf(t, x), x) # (batch,)
         
         # d(log_det)/dt = -trace (note o sinal!)
         dlogdet_dt = -trace.unsqueeze(-1) # (batch, 1)
@@ -113,32 +141,3 @@ class CNF(nn.Module):
         )[-1]
 
         return x
-
-
-
-def divergence_exact(f, x):
-    """
-    Calcula trace(∂f/∂x) exatamente usando autograd.
-    ATENÇÃO: Custo O(d2) - só viável para dimensão baixa!
-    Args:
-        f: função R^d -> R^d
-        x: input (batch, d)
-        Returns:
-        trace: (batch,)
-    """
-    batch_size, dim = x.shape
-
-    # TODO: Implementar
-    # Estratégia:
-    # 1. Para cada dimensão i:
-    # - Compute ∂f_i/∂x_i usando torch.autograd.grad
-    # 2. Somar todas as derivadas diagonais
-
-    # Pseudo-código:
-    # trace = 0
-    # for i in range(dim):
-    # # Compute ∂f[i]/∂x[i]
-    # df_i = autograd.grad(f[:, i].sum(), x, create_graph=True)[0]
-    # trace += df_i[:, i]
-    # return trace
-    pass
