@@ -25,6 +25,5 @@ class NeuralODE(nn.Module):
         if t_span is None:
             t_span = torch.tensor([0., 1.]).to(x0)
 
-        # TODO: usar odeint do torchdiffeq
-        # Dica: odeint(self.vf, x0, t_span, method=self.solver, ...)
-        pass
+        x_t = odeint(self.vf, x0, t_span, method=self.solver, rtol=self.rtol, atol=self.atol)
+        return x_t
