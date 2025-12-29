@@ -14,6 +14,7 @@ class VectorField(nn.Module):
     """
     def __init__(self, features, hidden_dims=[64, 64], time_embed_dim=16):
         super().__init__()
+        self.nfe = 0
         self.features = features
         self.time_embed_dim = time_embed_dim
 
@@ -83,6 +84,7 @@ class VectorField(nn.Module):
         Returns:
             dx_dt: (batch, features)
         """
+        self.nfe += 1
 
         # converte t em tensor caso nao seja
         if not torch.is_tensor(t):

@@ -3,50 +3,66 @@ from torchdiffeq import odeint
 import torch
 import torch.nn as nn
 
+def divergence_exact(f, x):
+	"""
+	Calcula trace(∂f/∂x) exatamente usando autograd.
+	ATENÇÃO: Custo O(d2) - só viável para dimensão baixa!
+	Args:
+		f: função R^d -> R^d
+		x: input (batch, d)
+		Returns:
+		trace: (batch,)
+	"""
+	batch_size, dim = x.shape
+
+	# TODO: Implementar
+	# Estratégia:
+	# 1. Para cada dimensão i:
+	# - Compute ∂f_i/∂x_i usando torch.autograd.grad
+	# 2. Somar todas as derivadas diagonais
+
+	# Pseudo-código:
+	# trace = 0 # check
+	# for i in range(dim): # check
+	# # Compute ∂f[i]/∂x[i]
+	# df_i = autograd.grad(f[:, i].sum(), x, create_graph=True)[0] #check
+	# trace += df_i[:, i]
+	# return trace
+
+	y = f(x)
+
+	trace = torch.zeros(batch_size, device=x.device)
+
+	for i in range(dim):
+		grad = torch.autograd.grad(
+			y[:, i].sum(),
+			x,
+			create_graph=True,
+			retain_graph=True
+		)[0]
+		trace += grad[:, i]
+
+	return trace
+
+
 class CNF(nn.Module):
+#loss: likelihood
+
     """
     Continuous Normalizing Flow com trace exato.
     """
-    def __init__(self, vector_field, base_dist=None):
+    def __init__(self, vector_field, device, base_dist=None):
         super().__init__()
         self.vf = vector_field
         if base_dist is None:
             # Prior: N(0, I)
             features = vector_field.features
             self.base_dist = torch.distributions.MultivariateNormal(
-                torch.zeros(features),
-                torch.eye(features)
+                torch.zeros(features, device=device),
+                torch.eye(features, device=device)
             )
         else:
             self.base_dist = base_dist
-
-    
-    def divergence_exact(f, x):
-        """
-        Calcula trace(∂f/∂x) exatamente usando autograd.
-        ATENÇÃO: Custo O(d2) - só viável para dimensão baixa!
-        Args:
-            f: função R^d -> R^d
-            x: input (batch, d)
-            Returns:
-            trace: (batch,)
-        """
-        batch_size, dim = x.shape
-
-        # TODO: Implementar
-        # Estratégia:
-        # 1. Para cada dimensão i:
-        # - Compute ∂f_i/∂x_i usando torch.autograd.grad
-        # 2. Somar todas as derivadas diagonais
-
-        # Pseudo-código:
-        # trace = 0
-        # for i in range(dim):
-        # # Compute ∂f[i]/∂x[i]
-        # df_i = autograd.grad(f[:, i].sum(), x, create_graph=True)[0]
-        # trace += df_i[:, i]
-        # return trace
-        pass
 
     def _augmented_dynamics(self, t, state):
         """
@@ -69,7 +85,7 @@ class CNF(nn.Module):
         dx_dt = self.vf(t, x) # (batch, features)
         
         # Compute trace do Jacobiano
-        trace = self.divergence_exact(lambda x: self.vf(t, x), x) # (batch,)
+        trace = divergence_exact(lambda x: self.vf(t, x), x) # (batch,)
         
         # d(log_det)/dt = -trace (note o sinal!)
         dlogdet_dt = -trace.unsqueeze(-1) # (batch, 1)
@@ -89,13 +105,13 @@ class CNF(nn.Module):
         
         # Integrar
         t_span = torch.tensor([0., 1.]).to(x)
-        state_1 = odeint_adjoint(
+        state_1 = odeint(
             self._augmented_dynamics,
             state_0,
             t_span,
             method='dopri5',
             rtol=1e-3,
-        atol=1e-4
+            atol=1e-4,
         )[-1] # Pegar apenas t=1
         
         z = state_1[:, :-1]
@@ -137,7 +153,7 @@ class CNF(nn.Module):
             t_span,
             method='dopri5',
             rtol=1e-3,
-            atol=1e-4
+            atol=1e-4,
         )[-1]
 
         return x
