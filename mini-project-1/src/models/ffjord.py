@@ -24,7 +24,7 @@ def hutchinson_trace_estimator(f, x, n_samples=1, noise='gaussian'):
         if noise == 'gaussian':
             epsilon = torch.randn_like(x) # N(0, I)
         elif noise == 'rademacher':
-            epsilon = torch.randint(0, 2, x.shape).float() * 2 - 1 # {-1, +1}
+            epsilon = torch.randint(0, 2, x.shape, device=x.device).float() * 2 - 1 # {-1, +1}
         else:
             raise ValueError(f"Unknown noise type: {noise}")
         
@@ -57,7 +57,7 @@ class FFJORD(nn.Module):
     Free-Form Jacobian of Reversible Dynamics.
     CNF escalável usando Hutchinson estimator.
     """
-    def __init__(self, vector_field, base_dist=None, n_trace_samples=1, noise='rademacher'):
+    def __init__(self, vector_field, device, base_dist=None, n_trace_samples=1, noise='rademacher'):
         super().__init__()
         self.vf = vector_field
         self.n_trace_samples = n_trace_samples
@@ -66,8 +66,8 @@ class FFJORD(nn.Module):
         if base_dist is None:
             features = vector_field.features
             self.base_dist = torch.distributions.MultivariateNormal(
-                torch.zeros(features),
-                torch.eye(features)
+                torch.zeros(features, device=device),
+                torch.eye(features, device=device)
             )
         else:
             self.base_dist = base_dist
@@ -115,6 +115,7 @@ class FFJORD(nn.Module):
             method='dopri5',
             rtol=1e-3,
             atol=1e-4,
+            adjoint_params=tuple(self.parameters())
         )[-1] # Pegar apenas t=1
         
         z = state_1[:, :-1]
