@@ -11,7 +11,7 @@ Recomenda-se o uso de um virtual environment do python para gerenciamento das de
 pip install -r mini-project-1/requirements.txt
 ```
 
-Alternativamente, caso haj dificuldades para instalar via requirements.txt, basta descomentar nas células dos notebooks as intalações manuais e executar as células.
+Alternativamente, caso haja dificuldade para instalar via requirements.txt, basta descomentar nas células dos notebooks as instalações manuais e executar as células.
 
 ## Execução
 
