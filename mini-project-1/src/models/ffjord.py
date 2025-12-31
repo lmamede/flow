@@ -1,12 +1,63 @@
 import torch
 import torch.nn as nn
+from torchdiffeq import odeint
+from torchdiffeq import odeint_adjoint
+
+def hutchinson_trace_estimator(f, x, n_samples=1, noise='gaussian'):
+    """
+    Estima trace(∂f/∂x) usando Hutchinson's trick.
+    Custo: O(d) por sample - escalável!
+    Args:
+        f: função R^d -> R^d
+        x: input (batch, d)
+        n_samples: número de samples para estimativa
+        noise: 'gaussian' ou 'rademacher'
+    Returns:
+        trace_estimate: (batch,)
+    """
+    batch_size, dim = x.shape
+    
+    trace_estimates = []
+    
+    for _ in range(n_samples):
+        # Sample ε
+        if noise == 'gaussian':
+            epsilon = torch.randn_like(x) # N(0, I)
+        elif noise == 'rademacher':
+            epsilon = torch.randint(0, 2, x.shape, device=x.device).float() * 2 - 1 # {-1, +1}
+        else:
+            raise ValueError(f"Unknown noise type: {noise}")
+        
+        # Compute f(x)
+        with torch.enable_grad():
+            x_req = x.requires_grad_(True)
+            f_x = f(x_req)
+            
+            # Compute ε^T (∂f/∂x) via vector-Jacobian product
+            # Equivalente a ε^T A onde A = ∂f/∂x
+            # torch.autograd.grad computa exatamente isso!
+            vjp = torch.autograd.grad(
+                f_x,
+                x_req,
+                grad_outputs=epsilon,
+                create_graph=True,
+                retain_graph=True
+            )[0]
+
+            # trace ≈ ε^T v onde v = (∂f/∂x)^T ε
+            trace_est = (epsilon * vjp).sum(dim=-1) # (batch,)
+        
+        trace_estimates.append(trace_est)
+
+    # Média sobre samples
+    return torch.stack(trace_estimates).mean(dim=0)
 
 class FFJORD(nn.Module):
     """
     Free-Form Jacobian of Reversible Dynamics.
     CNF escalável usando Hutchinson estimator.
     """
-    def __init__(self, vector_field, base_dist=None, n_trace_samples=1, noise='rademacher'):
+    def __init__(self, vector_field, device, base_dist=None, n_trace_samples=1, noise='rademacher'):
         super().__init__()
         self.vf = vector_field
         self.n_trace_samples = n_trace_samples
@@ -15,8 +66,8 @@ class FFJORD(nn.Module):
         if base_dist is None:
             features = vector_field.features
             self.base_dist = torch.distributions.MultivariateNormal(
-                torch.zeros(features),
-                torch.eye(features)
+                torch.zeros(features, device=device),
+                torch.eye(features, device=device)
             )
         else:
             self.base_dist = base_dist
@@ -44,52 +95,45 @@ class FFJORD(nn.Module):
     
     # forward, log_prob, sample: similares ao CNF
     # (copiar implementação, mudando apenas _augmented_dynamics)
-
-    def hutchinson_trace_estimator(f, x, n_samples=1, noise='gaussian'):
+    def forward(self, x):
         """
-        Estima trace(∂f/∂x) usando Hutchinson's trick.
-        Custo: O(d) por sample - escalável!
-        Args:
-            f: função R^d -> R^d
-            x: input (batch, d)
-            n_samples: número de samples para estimativa
-            noise: 'gaussian' ou 'rademacher'
-        Returns:
-            trace_estimate: (batch,)
+        Forward: x → z (usado para sampling)
+        Integra de t=0 para t=1.
         """
-        batch_size, dim = x.shape
+        batch_size = x.shape[0]
         
-        trace_estimates = []
+        # Estado inicial: [x, 0]
+        log_det_init = torch.zeros(batch_size, 1).to(x)
+        state_0 = torch.cat([x, log_det_init], dim=-1)
         
-        for _ in range(n_samples):
-            # Sample ε
-            if noise == 'gaussian':
-                epsilon = torch.randn_like(x) # N(0, I)
-            elif noise == 'rademacher':
-                epsilon = torch.randint(0, 2, x.shape).float() * 2 - 1 # {-1, +1}
-            else:
-                raise ValueError(f"Unknown noise type: {noise}")
-            
-            # Compute f(x)
-            with torch.enable_grad():
-                x_req = x.requires_grad_(True)
-                f_x = f(x_req)
-                
-                # Compute ε^T (∂f/∂x) via vector-Jacobian product
-                # Equivalente a ε^T A onde A = ∂f/∂x
-                # torch.autograd.grad computa exatamente isso!
-                vjp = torch.autograd.grad(
-                    f_x,
-                    x_req,
-                    grad_outputs=epsilon,
-                    create_graph=True,
-                    retain_graph=True
-                )[0]
+        # Integrar
+        t_span = torch.tensor([0., 1.]).to(x)
+        state_1 = odeint_adjoint(
+            self._augmented_dynamics,
+            state_0,
+            t_span,
+            method='dopri5',
+            rtol=1e-3,
+            atol=1e-4,
+            adjoint_params=tuple(self.parameters())
+        )[-1] # Pegar apenas t=1
+        
+        z = state_1[:, :-1]
+        delta_log_det = state_1[:, -1]
 
-                # trace ≈ ε^T v onde v = (∂f/∂x)^T ε
-                trace_est = (epsilon * vjp).sum(dim=-1) # (batch,)
-            
-            trace_estimates.append(trace_est)
+        return z, delta_log_det
+    
+    def log_prob(self, x):
+        """
+        Calcula log p(x) usando change of variables.
+        """
+        # Forward pass: x → z
+        z, delta_log_det = self.forward(x)
+        
+        # log p(z) do prior
+        log_pz = self.base_dist.log_prob(z)
+        
+        # log p(x) = log p(z) + log |det J|
+        log_px = log_pz + delta_log_det
 
-        # Média sobre samples
-        return torch.stack(trace_estimates).mean(dim=0)
+        return log_px
